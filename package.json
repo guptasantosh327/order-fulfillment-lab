@@ -1,0 +1,30 @@
+{
+  "name": "order-fulfillment-lab",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Learning project: Docker/ECR/EKS, ACID, outbox, SNS/SQS, Redis locks, SAGA",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*",
+    "services/*"
+  ],
+  "scripts": {
+    "lint": "biome lint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "tsc --build",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.2.0",
+    "@types/node": "^22.10.0",
+    "@types/supertest": "^6.0.2",
+    "prettier": "^3.4.2",
+    "supertest": "^7.0.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.0"
+  }
+}

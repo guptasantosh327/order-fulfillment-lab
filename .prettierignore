@@ -1,0 +1,7 @@
+node_modules
+dist
+**/*.tsbuildinfo
+package-lock.json
+
+# Authored spec — left exactly as written, not machine-formatted
+CLAUDE.md
