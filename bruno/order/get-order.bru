@@ -1,0 +1,16 @@
+meta {
+  name: Get Order
+  type: http
+  seq: 4
+}
+
+get {
+  url: {{orderBaseUrl}}/orders/{{orderId}}
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.id: eq {{orderId}}
+}

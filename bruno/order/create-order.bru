@@ -1,0 +1,31 @@
+meta {
+  name: Create Order
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{orderBaseUrl}}/orders
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "customerId": "cust-123",
+    "itemSku": "SKU-1",
+    "quantity": 2
+  }
+}
+
+script:post-response {
+  // Capture the new id so get/update/delete requests can reuse it.
+  if (res.getStatus() === 201) {
+    bru.setVar("orderId", res.getBody().id);
+  }
+}
+
+assert {
+  res.status: eq 201
+  res.body.status: eq PENDING
+}

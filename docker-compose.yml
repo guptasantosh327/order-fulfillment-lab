@@ -1,0 +1,95 @@
+# Local development only. This captures, as code, the same thing a hand-typed
+# `docker run` would do for the order service — build context, port mapping,
+# env, restart policy, healthcheck. Right now it is deliberately ONE service;
+# Postgres (Stage 2) and Redis (Stage 10) join this same file later.
+#
+#   docker compose up --build        # build + start in the foreground
+#   docker compose up -d --build     # ... detached
+#   docker compose ps                # status (incl. health)
+#   docker compose logs -f order     # tail logs
+#   docker compose down              # stop + remove
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: order
+      POSTGRES_PASSWORD: orderpw
+      POSTGRES_DB: orderdb
+    ports:
+      # Published only so you can psql from the host while learning; container-
+      # to-container traffic does NOT need this (it uses the compose network).
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # pg_isready returns 0 only once Postgres is actually accepting connections,
+    # which is what `order`'s depends_on waits for below.
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U order -d orderdb']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  # One-shot: applies pending migrations, then exits 0. It OWNS the build of the
+  # shared ofl-order:dev image because it is the first service to start (order
+  # depends on it). A single build-owner avoids two services racing to build the
+  # same tag; `order` below just references the already-built image.
+  # This mirrors the k8s Job / init-container pattern that replaces it later —
+  # schema changes are a separate step from running the app.
+  migrate:
+    build:
+      # Root context (not services/order) so the build can see the root
+      # package.json, the lockfile, and future packages/* — see the Dockerfile.
+      context: .
+      dockerfile: services/order/Dockerfile
+    image: ofl-order:dev
+    container_name: order-migrate
+    command: ['npx', 'node-pg-migrate', '-m', 'services/order/migrations', 'up']
+    environment:
+      DATABASE_URL: postgres://order:orderpw@postgres:5432/orderdb
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  order:
+    # No build here: `migrate` (which starts first) builds ofl-order:dev, and
+    # order reuses that exact image. depends_on guarantees migrate has run first.
+    image: ofl-order:dev
+    container_name: order
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+      # Host is the SERVICE NAME `postgres`, resolved via compose's network DNS.
+      DATABASE_URL: postgres://order:orderpw@postgres:5432/orderdb
+    # Wait for Postgres to be healthy AND migrations to have completed before
+    # starting, so the app never serves against an un-migrated schema.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    # Uses Node's built-in fetch (Node 22+) so the check needs no extra tools
+    # in the image — it exercises the real /health route from inside the container.
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+
+# Named volume so Postgres data survives `compose down` / container restarts.
+# (Removed only by `docker compose down -v`.)
+volumes:
+  postgres-data:

@@ -158,6 +158,28 @@ Remote Terraform state, Helm, CI/CD via GitHub Actions, service mesh, multi-regi
 - **Keep a Bruno collection in sync with every HTTP API.** Whenever an endpoint is added, removed, or its method/path/body/headers/response change, create or update the matching `.bru` request in the repo's Bruno collection (`bruno/` at the repo root, organized per service) in the same change — never as a follow-up. The committed `.bru` files are the always-current, runnable record of every route; a phase that adds or alters an API isn't done until its Bruno request reflects the new shape.
 - Treat any AWS cost-increasing decision (new resource type, multi-AZ, a managed service swap) as something to flag and confirm, not decide silently — see the cost-discipline section above.
 
+## Design patterns — apply the one that fits, never one that doesn't
+
+For every non-trivial piece of code, pick the design pattern that genuinely fits the problem, apply it deliberately, and say in one line *why* that pattern (the same way phases are explained). This is about choosing good structure on purpose — not about decorating the code with patterns.
+
+Hard constraints that override any pattern instinct (these come first, always):
+
+- **Patterns serve the learning goal; they never hide it.** The raw mechanics this repo exists to teach — transaction boundaries, `FOR UPDATE`/isolation levels, the outbox dual-write, `SET NX PX` locking, saga compensation — must stay visible and hand-rolled. If a pattern would wrap one of these in an abstraction that obscures what's actually happening, don't use it. This rule beats "cleaner code."
+- **No premature abstraction (YAGNI + rule of three).** Don't introduce an interface, factory, strategy, or generic layer for a single concrete case. Wait until there are ~3 real cases that share shape, then extract. One-phase-at-a-time already forbids building for hypothetical futures; the same applies to patterns.
+- **Simplest thing that fits wins.** A plain function beats a class beats a hierarchy. Reach for a pattern only when the problem actually has the shape that pattern solves — not because it's well-known.
+- **Match the surrounding code.** A pattern already established in the repo is the right default for the next similar problem; don't introduce a second way to do the same thing without flagging why.
+
+Patterns that fit this codebase well (use when the problem calls for it, justify briefly):
+
+- **Separate construction from execution / dependency injection.** Already in play: `createApp()` builds the app without binding a port so it's testable; DB/SNS/SQS/Redis clients are passed in or read from env, never hard-wired. Prefer injecting collaborators (pool, clients, clock) over reaching for module singletons when it makes a unit testable.
+- **Thin repository / data-access module per aggregate.** Keep a service's SQL in one place behind small functions (`findOrderById`, `insertOrder`) — but the body stays **raw SQL**, no ORM, no query builder. The point is one obvious home for queries, not a layer that hides them.
+- **Transactional outbox, idempotent consumer, saga (orchestration & choreography).** These are first-class in the phase plan; implement them as the named patterns they are, hand-rolled.
+- **Distributed lock as an explicit guard.** The Redis lock is a pattern with a clear acquire/critical-section/release shape and a Lua-script release — keep that shape obvious.
+- **Typed errors + a single error-handling seam.** Consistent, typed failures and one place that maps them to HTTP responses / retries, rather than ad-hoc `try/catch` scattered per route.
+- **Graceful-shutdown / lifecycle hook.** A single startup→ready→drain→exit lifecycle (Stage 12) rather than shutdown logic sprinkled around.
+
+When a phase's design would be materially better with a pattern not listed here, propose it with the one-line rationale and the trade-off — don't silently adopt it, and don't avoid it dogmatically either.
+
 ## Open questions to flag, not decide silently
 
 - Whether Payment and Shipping (Stage 9) simulate external APIs or attempt real sandbox integrations — default to simulated, since the learning target is the messaging/saga mechanics, not third-party integration.

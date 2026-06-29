@@ -1,0 +1,110 @@
+import type { Pool, PoolClient } from 'pg';
+
+/**
+ * Anything that can run a query — the connection pool today, or a single
+ * PoolClient bound to an open transaction in Stage 3. Repository functions take
+ * this so the SAME query can run standalone or inside a transaction without a
+ * second code path.
+ */
+export type Queryable = Pool | PoolClient;
+
+export const ORDER_STATUSES = ['PENDING', 'CONFIRMED', 'CANCELLED'] as const;
+export type OrderStatus = (typeof ORDER_STATUSES)[number];
+
+export interface Order {
+  id: string;
+  customerId: string;
+  itemSku: string;
+  quantity: number;
+  status: OrderStatus;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface NewOrder {
+  customerId: string;
+  itemSku: string;
+  quantity: number;
+}
+
+export interface OrderPatch {
+  status?: OrderStatus;
+  quantity?: number;
+}
+
+/** Shape of a raw row as Postgres returns it (snake_case columns). */
+interface OrderRow {
+  id: string;
+  customer_id: string;
+  item_sku: string;
+  quantity: number;
+  status: OrderStatus;
+  created_at: Date;
+  updated_at: Date;
+}
+
+function mapRow(row: OrderRow): Order {
+  return {
+    id: row.id,
+    customerId: row.customer_id,
+    itemSku: row.item_sku,
+    quantity: row.quantity,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function insertOrder(db: Queryable, input: NewOrder): Promise<Order> {
+  const result = await db.query<OrderRow>(
+    `INSERT INTO orders (customer_id, item_sku, quantity)
+     VALUES ($1, $2, $3)
+     RETURNING *`,
+    [input.customerId, input.itemSku, input.quantity],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new Error('insert returned no row');
+  }
+  return mapRow(row);
+}
+
+export async function getOrderById(db: Queryable, id: string): Promise<Order | null> {
+  const result = await db.query<OrderRow>('SELECT * FROM orders WHERE id = $1', [id]);
+  const row = result.rows[0];
+  return row ? mapRow(row) : null;
+}
+
+export async function listOrders(db: Queryable): Promise<Order[]> {
+  const result = await db.query<OrderRow>('SELECT * FROM orders ORDER BY created_at DESC');
+  return result.rows.map(mapRow);
+}
+
+/**
+ * COALESCE($n, col) keeps the existing value when a field is omitted (passed as
+ * null), so this one statement handles partial updates without building dynamic
+ * SQL. Returns null when no row matched the id.
+ */
+export async function updateOrder(
+  db: Queryable,
+  id: string,
+  patch: OrderPatch,
+): Promise<Order | null> {
+  const result = await db.query<OrderRow>(
+    `UPDATE orders
+        SET status     = COALESCE($2, status),
+            quantity   = COALESCE($3, quantity),
+            updated_at = now()
+      WHERE id = $1
+      RETURNING *`,
+    [id, patch.status ?? null, patch.quantity ?? null],
+  );
+  const row = result.rows[0];
+  return row ? mapRow(row) : null;
+}
+
+/** Returns true if a row was deleted, false if the id did not exist. */
+export async function deleteOrder(db: Queryable, id: string): Promise<boolean> {
+  const result = await db.query('DELETE FROM orders WHERE id = $1', [id]);
+  return (result.rowCount ?? 0) > 0;
+}

@@ -37,6 +37,9 @@ COPY --from=builder --chown=node:node /app/package.json ./package.json
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/services/order/package.json ./services/order/package.json
 COPY --from=builder --chown=node:node /app/services/order/dist ./services/order/dist
+# Migrations are plain .sql, run by the one-shot `migrate` compose service (and
+# later a k8s Job) from this same image — so they must ship in it.
+COPY --from=builder --chown=node:node /app/services/order/migrations ./services/order/migrations
 
 USER node
 EXPOSE 3000
