@@ -28,4 +28,5 @@ script:post-response {
 assert {
   res.status: eq 201
   res.body.status: eq PENDING
+  res.body.id: isNumber
 }

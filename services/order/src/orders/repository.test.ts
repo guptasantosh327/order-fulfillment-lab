@@ -7,7 +7,7 @@ import { deleteOrder, getOrderById, insertOrder, listOrders, updateOrder } from 
 let container: StartedPostgreSqlContainer;
 let pool: Pool;
 
-const MISSING_ID = '00000000-0000-0000-0000-000000000000';
+const MISSING_ID = 999_999;
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer('postgres:16-alpine').start();
@@ -37,15 +37,24 @@ beforeEach(async () => {
 });
 
 describe('orders repository', () => {
-  it('creates an order with server-side defaults and reads it back', async () => {
+  it('creates an order with a DB-assigned sequential id and reads it back', async () => {
     const created = await insertOrder(pool, { customerId: 'c1', itemSku: 'SKU-1', quantity: 3 });
 
-    expect(created.id).toBeTruthy();
+    // id is a DB-assigned sequential bigint, surfaced as a JS number.
+    expect(typeof created.id).toBe('number');
+    expect(created.id).toBeGreaterThanOrEqual(1001);
     expect(created.status).toBe('PENDING');
     expect(created.quantity).toBe(3);
 
     const fetched = await getOrderById(pool, created.id);
     expect(fetched).toEqual(created);
+  });
+
+  it('assigns ids sequentially', async () => {
+    const first = await insertOrder(pool, { customerId: 'c1', itemSku: 'A', quantity: 1 });
+    const second = await insertOrder(pool, { customerId: 'c1', itemSku: 'B', quantity: 1 });
+
+    expect(second.id).toBeGreaterThan(first.id);
   });
 
   it('returns null for a missing order', async () => {

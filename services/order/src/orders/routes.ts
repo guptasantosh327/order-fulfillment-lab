@@ -1,4 +1,4 @@
-import { Router, type Response } from 'express';
+import { type Request, type Response, Router } from 'express';
 import type { Pool } from 'pg';
 import { z } from 'zod';
 import {
@@ -27,8 +27,21 @@ const updateOrderSchema = z
     message: 'provide at least one of status or quantity',
   });
 
+// The :id path param arrives as a string; coerce + validate it's a positive int.
+const idParam = z.coerce.number().int().positive();
+
 function badRequest(res: Response, error: z.ZodError): void {
   res.status(400).json({ error: 'invalid request body', details: error.flatten() });
+}
+
+/** Parses :id, sending a 400 and returning null when it isn't a positive int. */
+function parseId(req: Request, res: Response): number | null {
+  const parsed = idParam.safeParse(req.params.id);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'order id must be a positive integer' });
+    return null;
+  }
+  return parsed.data;
 }
 
 /**
@@ -55,7 +68,11 @@ export function createOrdersRouter(pool: Pool): Router {
   });
 
   router.get('/:id', async (req, res) => {
-    const order = await getOrderById(pool, req.params.id);
+    const id = parseId(req, res);
+    if (id === null) {
+      return;
+    }
+    const order = await getOrderById(pool, id);
     if (!order) {
       res.status(404).json({ error: 'order not found' });
       return;
@@ -64,12 +81,16 @@ export function createOrdersRouter(pool: Pool): Router {
   });
 
   router.patch('/:id', async (req, res) => {
+    const id = parseId(req, res);
+    if (id === null) {
+      return;
+    }
     const parsed = updateOrderSchema.safeParse(req.body);
     if (!parsed.success) {
       badRequest(res, parsed.error);
       return;
     }
-    const order = await updateOrder(pool, req.params.id, parsed.data);
+    const order = await updateOrder(pool, id, parsed.data);
     if (!order) {
       res.status(404).json({ error: 'order not found' });
       return;
@@ -78,7 +99,11 @@ export function createOrdersRouter(pool: Pool): Router {
   });
 
   router.delete('/:id', async (req, res) => {
-    const deleted = await deleteOrder(pool, req.params.id);
+    const id = parseId(req, res);
+    if (id === null) {
+      return;
+    }
+    const deleted = await deleteOrder(pool, id);
     if (!deleted) {
       res.status(404).json({ error: 'order not found' });
       return;

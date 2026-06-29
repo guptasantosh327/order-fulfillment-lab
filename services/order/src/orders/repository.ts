@@ -12,7 +12,7 @@ export const ORDER_STATUSES = ['PENDING', 'CONFIRMED', 'CANCELLED'] as const;
 export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 export interface Order {
-  id: string;
+  id: number;
   customerId: string;
   itemSku: string;
   quantity: number;
@@ -34,6 +34,7 @@ export interface OrderPatch {
 
 /** Shape of a raw row as Postgres returns it (snake_case columns). */
 interface OrderRow {
+  // pg returns BIGINT (int8) as a string to avoid precision loss; converted below.
   id: string;
   customer_id: string;
   item_sku: string;
@@ -45,7 +46,7 @@ interface OrderRow {
 
 function mapRow(row: OrderRow): Order {
   return {
-    id: row.id,
+    id: Number(row.id),
     customerId: row.customer_id,
     itemSku: row.item_sku,
     quantity: row.quantity,
@@ -69,7 +70,7 @@ export async function insertOrder(db: Queryable, input: NewOrder): Promise<Order
   return mapRow(row);
 }
 
-export async function getOrderById(db: Queryable, id: string): Promise<Order | null> {
+export async function getOrderById(db: Queryable, id: number): Promise<Order | null> {
   const result = await db.query<OrderRow>('SELECT * FROM orders WHERE id = $1', [id]);
   const row = result.rows[0];
   return row ? mapRow(row) : null;
@@ -87,7 +88,7 @@ export async function listOrders(db: Queryable): Promise<Order[]> {
  */
 export async function updateOrder(
   db: Queryable,
-  id: string,
+  id: number,
   patch: OrderPatch,
 ): Promise<Order | null> {
   const result = await db.query<OrderRow>(
@@ -104,7 +105,7 @@ export async function updateOrder(
 }
 
 /** Returns true if a row was deleted, false if the id did not exist. */
-export async function deleteOrder(db: Queryable, id: string): Promise<boolean> {
+export async function deleteOrder(db: Queryable, id: number): Promise<boolean> {
   const result = await db.query('DELETE FROM orders WHERE id = $1', [id]);
   return (result.rowCount ?? 0) > 0;
 }

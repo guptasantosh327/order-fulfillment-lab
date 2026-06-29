@@ -1,9 +1,10 @@
 -- Up Migration
--- gen_random_uuid() is built into Postgres core (13+), so no pgcrypto extension
--- is needed. quantity is CHECK-guarded > 0; status defaults to PENDING. No
--- transaction/locking concerns here yet — that arrives in Stage 3.
+-- id is a human-friendly sequential number assigned by the DB (GENERATED ALWAYS
+-- means callers cannot set it), starting at 1001 so it reads like a real order
+-- number rather than 1, 2, 3. quantity is CHECK-guarded > 0; status defaults to
+-- PENDING. No transaction/locking concerns here yet — that arrives in Stage 3.
 CREATE TABLE orders (
-  id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  id          BIGINT      GENERATED ALWAYS AS IDENTITY (START WITH 1001) PRIMARY KEY,
   customer_id TEXT        NOT NULL,
   item_sku    TEXT        NOT NULL,
   quantity    INTEGER     NOT NULL CHECK (quantity > 0),
