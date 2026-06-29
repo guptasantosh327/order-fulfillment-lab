@@ -2,7 +2,15 @@ import { PostgreSqlContainer, type StartedPostgreSqlContainer } from '@testconta
 import { runner } from 'node-pg-migrate';
 import { Pool } from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { deleteOrder, getOrderById, insertOrder, listOrders, updateOrder } from './repository.js';
+import { withTransaction } from '../db.js';
+import {
+  deleteOrder,
+  getOrderById,
+  insertOrder,
+  insertOrderIdempotent,
+  listOrders,
+  updateOrder,
+} from './repository.js';
 
 let container: StartedPostgreSqlContainer;
 let pool: Pool;
@@ -88,5 +96,67 @@ describe('orders repository', () => {
     expect(await deleteOrder(pool, created.id)).toBe(true);
     expect(await deleteOrder(pool, created.id)).toBe(false);
     expect(await getOrderById(pool, created.id)).toBeNull();
+  });
+});
+
+describe('idempotent writes', () => {
+  it('returns the same order for a repeated idempotency key, creating one row', async () => {
+    const key = 'idem-key-1';
+    const input = { customerId: 'c1', itemSku: 'SKU-1', quantity: 2 };
+
+    const first = await insertOrderIdempotent(pool, input, key);
+    const second = await insertOrderIdempotent(pool, input, key);
+
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.order.id).toBe(first.order.id);
+
+    const all = await listOrders(pool);
+    expect(all.filter((o) => o.idempotencyKey === key)).toHaveLength(1);
+  });
+
+  it('is safe under concurrent inserts with the same key', async () => {
+    const key = 'idem-key-concurrent';
+    const input = { customerId: 'c1', itemSku: 'SKU-1', quantity: 1 };
+
+    const results = await Promise.all([
+      insertOrderIdempotent(pool, input, key),
+      insertOrderIdempotent(pool, input, key),
+      insertOrderIdempotent(pool, input, key),
+    ]);
+
+    const ids = new Set(results.map((r) => r.order.id));
+    expect(ids.size).toBe(1); // all calls resolved to the same order
+    expect(results.filter((r) => r.created)).toHaveLength(1); // exactly one created it
+
+    const all = await listOrders(pool);
+    expect(all.filter((o) => o.idempotencyKey === key)).toHaveLength(1);
+  });
+});
+
+describe('constraint violation mid-transaction', () => {
+  it('rolls back the whole transaction so no partial write survives', async () => {
+    // Seed a row that owns the key, so the second insert below will collide.
+    await insertOrderIdempotent(
+      pool,
+      { customerId: 'c1', itemSku: 'SEED', quantity: 1 },
+      'dup-key',
+    );
+
+    await expect(
+      withTransaction(pool, async (client) => {
+        // First write would succeed on its own...
+        await insertOrder(client, { customerId: 'c2', itemSku: 'SHOULD-NOT-PERSIST', quantity: 1 });
+        // ...but this duplicate key violates the UNIQUE constraint, aborting the tx.
+        await client.query(
+          `INSERT INTO orders (customer_id, item_sku, quantity, idempotency_key)
+           VALUES ('c3', 'BOOM', 1, 'dup-key')`,
+        );
+      }),
+    ).rejects.toThrow();
+
+    // The first insert must have been rolled back along with the failed one.
+    const all = await listOrders(pool);
+    expect(all.some((o) => o.itemSku === 'SHOULD-NOT-PERSIST')).toBe(false);
   });
 });

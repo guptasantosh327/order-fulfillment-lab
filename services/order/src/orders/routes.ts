@@ -5,6 +5,7 @@ import {
   deleteOrder,
   getOrderById,
   insertOrder,
+  insertOrderIdempotent,
   listOrders,
   ORDER_STATUSES,
   updateOrder,
@@ -59,6 +60,20 @@ export function createOrdersRouter(pool: Pool): Router {
       badRequest(res, parsed.error);
       return;
     }
+
+    // An optional Idempotency-Key makes create safe to retry: the same key
+    // returns the original order (200) instead of creating a duplicate (201).
+    const idempotencyKey = req.get('Idempotency-Key');
+    if (idempotencyKey !== undefined) {
+      if (idempotencyKey.length < 1 || idempotencyKey.length > 255) {
+        res.status(400).json({ error: 'Idempotency-Key header must be 1–255 characters' });
+        return;
+      }
+      const { order, created } = await insertOrderIdempotent(pool, parsed.data, idempotencyKey);
+      res.status(created ? 201 : 200).json(order);
+      return;
+    }
+
     const order = await insertOrder(pool, parsed.data);
     res.status(201).json(order);
   });

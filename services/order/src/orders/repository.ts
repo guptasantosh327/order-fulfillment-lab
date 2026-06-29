@@ -17,6 +17,7 @@ export interface Order {
   itemSku: string;
   quantity: number;
   status: OrderStatus;
+  idempotencyKey: string | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -40,6 +41,7 @@ interface OrderRow {
   item_sku: string;
   quantity: number;
   status: OrderStatus;
+  idempotency_key: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -51,6 +53,7 @@ function mapRow(row: OrderRow): Order {
     itemSku: row.item_sku,
     quantity: row.quantity,
     status: row.status,
+    idempotencyKey: row.idempotency_key,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -68,6 +71,49 @@ export async function insertOrder(db: Queryable, input: NewOrder): Promise<Order
     throw new Error('insert returned no row');
   }
   return mapRow(row);
+}
+
+export interface IdempotentInsertResult {
+  order: Order;
+  /** true if this call created the row; false if an existing row was returned. */
+  created: boolean;
+}
+
+/**
+ * Idempotent create keyed on idempotency_key. `ON CONFLICT DO NOTHING` lets the
+ * DB's UNIQUE constraint absorb a duplicate without erroring: if our INSERT wins
+ * we get the new row back (created); if a row with the key already exists we get
+ * nothing back and fetch the existing one (not created).
+ *
+ * This is concurrency-safe: if a competing transaction is mid-insert with the
+ * same key, ON CONFLICT blocks until it commits, so the follow-up SELECT is
+ * guaranteed to see the winning row.
+ */
+export async function insertOrderIdempotent(
+  db: Queryable,
+  input: NewOrder,
+  idempotencyKey: string,
+): Promise<IdempotentInsertResult> {
+  const inserted = await db.query<OrderRow>(
+    `INSERT INTO orders (customer_id, item_sku, quantity, idempotency_key)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (idempotency_key) DO NOTHING
+     RETURNING *`,
+    [input.customerId, input.itemSku, input.quantity, idempotencyKey],
+  );
+  const insertedRow = inserted.rows[0];
+  if (insertedRow) {
+    return { order: mapRow(insertedRow), created: true };
+  }
+
+  const existing = await db.query<OrderRow>('SELECT * FROM orders WHERE idempotency_key = $1', [
+    idempotencyKey,
+  ]);
+  const existingRow = existing.rows[0];
+  if (!existingRow) {
+    throw new Error('idempotent insert conflicted but no existing row was found');
+  }
+  return { order: mapRow(existingRow), created: false };
 }
 
 export async function getOrderById(db: Queryable, id: number): Promise<Order | null> {

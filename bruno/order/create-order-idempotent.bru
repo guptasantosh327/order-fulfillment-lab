@@ -1,0 +1,34 @@
+meta {
+  name: Create Order (Idempotent)
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{orderBaseUrl}}/orders
+  body: json
+  auth: none
+}
+
+headers {
+  Idempotency-Key: {{idempKey}}
+}
+
+body:json {
+  {
+    "customerId": "cust-idem",
+    "itemSku": "SKU-IDEM",
+    "quantity": 1
+  }
+}
+
+script:pre-request {
+  // Fresh key per run so this creates a new order (201). Re-sending the SAME
+  // key against a running server returns the original order with 200 instead.
+  bru.setVar("idempKey", "idem-" + Date.now());
+}
+
+assert {
+  res.status: eq 201
+  res.body.idempotencyKey: eq {{idempKey}}
+}
