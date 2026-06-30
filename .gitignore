@@ -5,3 +5,10 @@ dist/
 .env.*
 .DS_Store
 .idea
+
+# Terraform — local state + provider cache never get committed; the lock file does.
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfplan
