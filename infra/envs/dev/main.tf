@@ -12,3 +12,9 @@ module "vpc" {
     "ap-south-1b" = "10.0.1.0/24"
   }
 }
+
+module "ecr_order" {
+  source = "../../modules/ecr"
+
+  name = "ofl/order"
+}
