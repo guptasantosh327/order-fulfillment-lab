@@ -1,0 +1,50 @@
+# Basic Deployment for the order service. Pulls the image from ECR — which only
+# works because the node IAM role has AmazonEC2ContainerRegistryReadOnly (that's
+# the step-13 lesson). No DATABASE_URL yet: the app starts without a DB (see
+# index.ts) and serves /health; Postgres joins in Stage 7.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order
+  labels:
+    app: order
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order
+  template:
+    metadata:
+      labels:
+        app: order
+    spec:
+      containers:
+        - name: order
+          # Account/region-specific ECR image. Rebuild for linux/amd64 (t3 nodes
+          # are x86) and push before deploying — see the runbook.
+          image: 542035162968.dkr.ecr.ap-south-1.amazonaws.com/ofl/order:v1
+          # Always re-pull so a re-pushed :v1 is picked up (and to re-exercise the
+          # ECR-pull permission each start). Fine for a learning setup.
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: 'production'
+            - name: PORT
+              value: '3000'
+          # /health is a pure liveness signal (no DB). readiness reuses it for now;
+          # a DB-aware readiness probe arrives with Postgres-on-EKS.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10

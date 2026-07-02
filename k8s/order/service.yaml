@@ -1,0 +1,19 @@
+# ClusterIP = internal-only virtual IP. Other pods reach the order service at
+# http://order (DNS = the Service name), load-balanced across its pods. Not
+# reachable from outside the cluster — that's step 14 (LoadBalancer/Ingress).
+# For now we reach it via `kubectl port-forward`.
+apiVersion: v1
+kind: Service
+metadata:
+  name: order
+  labels:
+    app: order
+spec:
+  type: ClusterIP
+  selector:
+    app: order # routes to every pod carrying this label
+  ports:
+    - name: http
+      port: 80 # the Service's port
+      targetPort: http # the container's port (named 'http' = 3000)
+      protocol: TCP

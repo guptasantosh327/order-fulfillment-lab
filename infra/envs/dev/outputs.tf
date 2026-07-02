@@ -12,3 +12,8 @@ output "ecr_order_repository_url" {
   description = "ECR repository URL for the order service (docker tag/push target)."
   value       = module.ecr_order.repository_url
 }
+
+output "eks_cluster_name" {
+  description = "EKS cluster name for `aws eks update-kubeconfig`."
+  value       = module.eks.cluster_name
+}
